@@ -1,0 +1,16 @@
+/* Custom CSS for My Book Editor (if needed) */
+/* This file is primarily for additional styles not covered by Tailwind CSS. */
+
+/* Example: If you need to override a Tailwind default or add a very specific style */
+/* .my-custom-class {
+    margin-top: 10px;
+} */
+
+/* Hide scrollbar for consistency if needed, as seen in previous aside */
+.hide-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari, Opera */
+}
