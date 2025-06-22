@@ -2,8 +2,8 @@
 /*
 Plugin Name: My Book Editor
 Plugin URI:  https://example.com/
-Description: A custom editor for book profiles, accessible via shortcode.
-Version:     1.0.0
+Description: A custom editor for book profiles, accessible via shortcode, with custom category and level dropdowns, and author selection.
+Version:     1.4.0 // Updated version for new features
 Author:      Muhamad Fikri Haikal
 Author URI:  https://caastedu.com/
 License:     GPL2
@@ -20,7 +20,7 @@ $my_book_editor_shortcode_used = false;
 
 // Define plugin constants
 if ( ! defined( 'MY_BOOK_EDITOR_VERSION' ) ) {
-    define( 'MY_BOOK_EDITOR_VERSION', '1.0.0' );
+    define( 'MY_BOOK_EDITOR_VERSION', '1.4.0' );
 }
 if ( ! defined( 'MY_BOOK_EDITOR_PLUGIN_URL' ) ) {
     define( 'MY_BOOK_EDITOR_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -57,7 +57,7 @@ function my_book_editor_register_cpt() {
         'public'              => true,
         'show_ui'             => true,
         'show_in_menu'        => true,
-        'menu_position'       => 21, // Position below Author Content
+        'menu_position'       => 21,
         'menu_icon'           => 'dashicons-book',
         'show_in_admin_bar'   => true,
         'show_in_nav_menus'   => true,
@@ -73,7 +73,9 @@ function my_book_editor_register_cpt() {
 }
 add_action( 'init', 'my_book_editor_register_cpt' );
 
-// Register custom taxonomies for Books (Category and Level)
+/**
+ * Register custom taxonomies for Books (Category and Level)
+ */
 function my_book_editor_register_taxonomies() {
     // Category Taxonomy
     $category_labels = array(
@@ -90,7 +92,7 @@ function my_book_editor_register_taxonomies() {
         'menu_name'         => __( 'Categories', 'my-book-editor' ),
     );
     $category_args = array(
-        'hierarchical'      => true, // Like categories
+        'hierarchical'      => true,
         'labels'            => $category_labels,
         'show_ui'           => true,
         'show_admin_column' => true,
@@ -112,7 +114,7 @@ function my_book_editor_register_taxonomies() {
         'menu_name'         => __( 'Levels', 'my-book-editor' ),
     );
     $level_args = array(
-        'hierarchical'      => false, // Like tags
+        'hierarchical'      => false,
         'labels'            => $level_labels,
         'show_ui'           => true,
         'show_admin_column' => true,
@@ -123,10 +125,42 @@ function my_book_editor_register_taxonomies() {
 }
 add_action( 'init', 'my_book_editor_register_taxonomies' );
 
+/**
+ * Add default terms for Book Categories and Levels on plugin activation.
+ */
+function my_book_editor_add_default_terms() {
+    $categories = array(
+        'Fiction',
+        'Non-fiction',
+        'Language Arts',
+        'STEM',
+        'Tests & Assessments',
+        'Arts & Design'
+    );
+    foreach ( $categories as $category_name ) {
+        if ( ! term_exists( $category_name, 'book_category' ) ) {
+            wp_insert_term( $category_name, 'book_category' );
+        }
+    }
+
+    $levels = array(
+        'Elementary',
+        'Intermediate',
+        'Advanced',
+        'College'
+    );
+    foreach ( $levels as $level_name ) {
+        if ( ! term_exists( $level_name, 'book_level' ) ) {
+            wp_insert_term( $level_name, 'book_level' );
+        }
+    }
+}
+register_activation_hook( __FILE__, 'my_book_editor_add_default_terms' );
+
 
 /**
  * Enqueue styles and scripts for the book editor.
- * This will only run if the shortcode is detected on the page.
+ * This will only run if the shortcode is detected on the current page.
  */
 function my_book_editor_enqueue_assets() {
     global $my_book_editor_shortcode_used;
@@ -134,21 +168,24 @@ function my_book_editor_enqueue_assets() {
     if ( $my_book_editor_shortcode_used ) {
         wp_enqueue_media(); // For media uploader
 
-        // Enqueue TinyMCE and other editor-related scripts
-        wp_enqueue_script('wp-tinymce');
-        wp_enqueue_script('editor');
-        wp_enqueue_script('wplink');
-        wp_enqueue_script('wp-plupload');
+        // Enqueue TinyMCE and other editor-related scripts (only if current user can use editor)
+        if ( current_user_can( 'edit_posts' ) ) {
+            wp_enqueue_script('wp-tinymce');
+            wp_enqueue_script('editor');
+            wp_enqueue_script('wplink');
+            wp_enqueue_script('wp-plupload');
+            wp_enqueue_script('thickbox');
+            wp_enqueue_style( 'thickbox' );
+        }
 
         // Enqueue the plugin's specific JavaScript
         wp_enqueue_script(
             'my-book-editor-script',
             MY_BOOK_EDITOR_PLUGIN_URL . 'js/my-book-editor.js',
-            array( 'jquery', 'wp-tinymce', 'editor', 'media-upload', 'thickbox' ),
+            array( 'jquery' ),
             MY_BOOK_EDITOR_VERSION,
             true
         );
-        wp_enqueue_style( 'thickbox' );
 
         // Enqueue plugin's custom CSS (if any, currently minimal)
         wp_enqueue_style(
@@ -163,6 +200,7 @@ function my_book_editor_enqueue_assets() {
             'ajaxurl'                 => admin_url( 'admin-ajax.php' ),
             'nonce'                   => wp_create_nonce( 'book_editor_nonce' ),
             'alert_no_book_selected'  => __( 'Please select a book first.', 'my-book-editor' ),
+            'alert_no_author_selected' => __( 'Please select an author first.', 'my-book-editor' ), // New alert for author
             'alert_confirm_delete'    => __( 'Are you sure you want to delete this book? This action cannot be undone.', 'my-book-editor' ),
             'alert_content_not_found' => __( 'No content found for the selected book.', 'my-book-editor' ),
         ) );
@@ -179,7 +217,7 @@ function my_book_editor_handle_submission() {
     }
 
     if ( ! is_user_logged_in() || ! current_user_can( 'edit_posts' ) ) {
-        wp_safe_redirect( home_url() );
+        wp_safe_redirect( add_query_arg( 'status', 'error_permissions', wp_get_referer() ) );
         exit;
     }
 
@@ -196,8 +234,12 @@ function my_book_editor_handle_submission() {
     $book_cover_id      = isset( $_POST['book_cover_id'] ) ? intval( $_POST['book_cover_id'] ) : 0;
     $footer_position    = isset( $_POST['footer_position'] ) ? sanitize_text_field( $_POST['footer_position'] ) : '';
     $insert_link        = isset( $_POST['insert_link'] ) ? esc_url_raw( $_POST['insert_link'] ) : '';
-    $book_category_ids  = isset( $_POST['book_category'] ) ? array_map( 'intval', $_POST['book_category'] ) : array();
-    $book_level_ids     = isset( $_POST['book_level'] ) ? array_map( 'intval', $_POST['book_level'] ) : array();
+
+    // Get selected taxonomy terms (slugs)
+    $book_category_slug = isset( $_POST['book_category'] ) ? sanitize_text_field( $_POST['book_category'] ) : '';
+    $book_level_slug    = isset( $_POST['book_level'] ) ? sanitize_text_field( $_POST['book_level'] ) : '';
+    $selected_author_id = isset( $_POST['selected_author_id'] ) ? intval( $_POST['selected_author_id'] ) : 0; // New: Author ID
+
     $submit_action      = sanitize_text_field( $_POST['submit_book_action'] );
 
     // Determine the book title to use for the post
@@ -213,9 +255,9 @@ function my_book_editor_handle_submission() {
 
     $existing_post_id = isset( $_POST['book_post_id'] ) ? intval( $_POST['book_post_id'] ) : 0;
 
-    // Basic validation
-    if ( empty( $post_title ) || empty( $book_content ) ) {
-        wp_safe_redirect( add_query_arg( 'status', 'error_empty_fields', wp_get_referer() ) );
+    // Basic validation for new book or updating existing book if title changed
+    if ( empty( $post_title ) && empty($existing_post_id) ) { // Only require title if creating new or if selected existing and its title is empty somehow
+        wp_safe_redirect( add_query_arg( 'status', 'error_empty_title', wp_get_referer() ) );
         exit;
     }
 
@@ -224,7 +266,7 @@ function my_book_editor_handle_submission() {
     $redirect_status = 'error';
 
     if ( $submit_action === 'publish' ) {
-        if ( current_user_can( 'publish_posts' ) ) {
+        if ( current_user_can( 'publish_book_profiles' ) || current_user_can( 'publish_posts' ) ) {
             $post_status = 'publish';
             $redirect_status = 'book_published';
         } else {
@@ -238,18 +280,27 @@ function my_book_editor_handle_submission() {
         $post_status = 'draft';
         $redirect_status = 'book_unpublished';
     } elseif ( $submit_action === 'archive' ) {
-        // Ensure 'archive' status is registered for 'book_profile' CPT
-        register_post_status( 'archive', array( 'public' => true ) ); // Re-register if needed for safety
-        $post_status = 'archive';
+        // Check if 'archive' post status is registered
+        if ( get_post_status_object('archive') ) {
+             $post_status = 'archive';
+        } else {
+            // Fallback to draft if 'archive' status is not registered
+            $post_status = 'draft';
+        }
         $redirect_status = 'book_archived';
     } elseif ( $submit_action === 'delete' ) {
         if ( $existing_post_id ) {
-            if ( wp_delete_post( $existing_post_id, true ) ) {
-                wp_safe_redirect( add_query_arg( 'status', 'book_deleted', wp_get_referer() ) );
-                exit;
+            if ( current_user_can( 'delete_book_profiles' ) || current_user_can( 'delete_posts' ) ) {
+                if ( wp_delete_post( $existing_post_id, true ) ) {
+                    wp_safe_redirect( add_query_arg( 'status', 'book_deleted', wp_get_referer() ) );
+                    exit;
+                } else {
+                    error_log( 'Error deleting book post: ' . $existing_post_id );
+                    wp_safe_redirect( add_query_arg( 'status', 'error_book_delete', wp_get_referer() ) );
+                    exit;
+                }
             } else {
-                error_log( 'Error deleting book post: ' . $existing_post_id );
-                wp_safe_redirect( add_query_arg( 'status', 'error_book_delete', wp_get_referer() ) );
+                wp_safe_redirect( add_query_arg( 'status', 'error_permissions', wp_get_referer() ) );
                 exit;
             }
         } else {
@@ -263,8 +314,8 @@ function my_book_editor_handle_submission() {
         'post_title'    => $post_title,
         'post_content'  => $book_content,
         'post_status'   => $post_status,
-        'post_type'     => 'book_profile', // Use your custom post type
-        'post_author'   => get_current_user_id(), // Assign to current user or selectable author if needed
+        'post_type'     => 'book_profile',
+        'post_author'   => get_current_user_id(),
     );
 
     $post_id = 0;
@@ -289,16 +340,31 @@ function my_book_editor_handle_submission() {
         if ( ! empty( $book_cover_id ) ) {
             set_post_thumbnail( $result, $book_cover_id );
         } else {
-            delete_post_thumbnail( $result );
+            delete_post_thumbnail( $result ); // Remove if ID is 0 or empty
         }
 
         // Save new footer fields as post meta
         update_post_meta( $result, '_footer_position', $footer_position );
         update_post_meta( $result, '_insert_link', $insert_link );
 
+        // Save selected Author ID as post meta for the book
+        // Only update if an author is explicitly selected or if it's a new book.
+        // If '0' (None) is selected, it will update to 0.
+        update_post_meta( $result, '_book_author_id', $selected_author_id );
+
+
         // Set taxonomies
-        wp_set_post_terms( $result, $book_category_ids, 'book_category', false );
-        wp_set_post_terms( $result, $book_level_ids, 'book_level', false );
+        if ( ! empty( $book_category_slug ) ) {
+            wp_set_post_terms( $result, $book_category_slug, 'book_category' );
+        } else {
+            wp_set_post_terms( $result, null, 'book_category' ); // Clear if no category selected
+        }
+
+        if ( ! empty( $book_level_slug ) ) {
+            wp_set_post_terms( $result, $book_level_slug, 'book_level' );
+        } else {
+            wp_set_post_terms( $result, null, 'book_level' ); // Clear if no level selected
+        }
 
         wp_safe_redirect( add_query_arg( 'status', $redirect_status, wp_get_referer() ) );
     }
@@ -311,13 +377,17 @@ add_action( 'admin_post_nopriv_my_book_editor_submit', 'my_book_editor_handle_su
  * AJAX handler to get book content based on book ID.
  */
 function my_book_editor_get_book_content_ajax() {
+    if ( ! is_user_logged_in() || ! current_user_can( 'edit_posts' ) ) {
+        wp_send_json_error( array( 'message' => __( 'You do not have permission to view this content.', 'my-book-editor' ) ) );
+    }
+
     check_ajax_referer( 'book_editor_nonce', 'nonce' );
 
     $book_id = isset( $_POST['book_id'] ) ? intval( $_POST['book_id'] ) : 0;
 
     if ( $book_id ) {
         $args = array(
-            'p'              => $book_id, // Get post by ID
+            'p'              => $book_id,
             'post_type'      => 'book_profile',
             'post_status'    => array( 'publish', 'pending', 'draft', 'archive' ),
             'posts_per_page' => 1,
@@ -327,25 +397,32 @@ function my_book_editor_get_book_content_ajax() {
         if ( $book_query->have_posts() ) {
             $book_post = $book_query->posts[0];
 
-            // Get categories and levels
-            $categories = wp_get_post_terms( $book_post->ID, 'book_category', array( 'fields' => 'ids' ) );
-            $levels = wp_get_post_terms( $book_post->ID, 'book_level', array( 'fields' => 'ids' ) );
+            $current_categories = wp_get_post_terms( $book_post->ID, 'book_category', array( 'fields' => 'slugs' ) );
+            $current_levels     = wp_get_post_terms( $book_post->ID, 'book_level', array( 'fields' => 'slugs' ) );
+            $associated_author_id = get_post_meta( $book_post->ID, '_book_author_id', true );
+
+            // Ensure book cover URL is fetched correctly
+            $book_cover_id = get_post_thumbnail_id( $book_post->ID );
+            $book_cover_url = $book_cover_id ? wp_get_attachment_url( $book_cover_id ) : '';
+
 
             wp_send_json_success( array(
                 'book_post_id'    => $book_post->ID,
                 'book_name'       => esc_html( $book_post->post_title ),
                 'book_subtitle'   => esc_html( get_post_meta( $book_post->ID, '_book_subtitle', true ) ),
                 'book_content'    => $book_post->post_content,
-                'book_cover_id'   => get_post_thumbnail_id( $book_post->ID ),
-                'book_cover_url'  => get_post_thumbnail_id( $book_post->ID ) ? wp_get_attachment_url( get_post_thumbnail_id( $book_post->ID ) ) : '',
+                'book_cover_id'   => $book_cover_id,
+                'book_cover_url'  => $book_cover_url,
                 'footer_position' => esc_html( get_post_meta( $book_post->ID, '_footer_position', true ) ),
                 'insert_link'     => esc_url( get_post_meta( $book_post->ID, '_insert_link', true ) ),
-                'book_category'   => $categories, // Array of IDs
-                'book_level'      => $levels,     // Array of IDs
+                'book_categories' => !empty($current_categories) ? $current_categories[0] : '',
+                'book_levels'     => !empty($current_levels) ? $current_levels[0] : '',
+                'associated_author_id' => intval($associated_author_id), // New: Send associated author ID
             ) );
         } else {
+            // If book ID is provided but no content found for it, clear form and allow new entry
             wp_send_json_success( array(
-                'book_post_id'    => 0,
+                'book_post_id'    => 0, // Reset to 0 for new content
                 'book_name'       => '',
                 'book_subtitle'   => '',
                 'book_content'    => '',
@@ -353,17 +430,66 @@ function my_book_editor_get_book_content_ajax() {
                 'book_cover_url'  => '',
                 'footer_position' => '',
                 'insert_link'     => '',
-                'book_category'   => array(),
-                'book_level'      => array(),
+                'book_categories' => '',
+                'book_levels'     => '',
+                'associated_author_id' => 0,
                 'message'         => 'No existing content found for this book. You can create a new one.',
             ) );
         }
     } else {
-        wp_send_json_error( array( 'message' => __( 'Invalid book ID.', 'my-book-editor' ) ) );
+        // If no book ID, implies a fresh start or "Add New" scenario
+        wp_send_json_success( array(
+            'book_post_id'    => 0,
+            'book_name'       => '',
+            'book_subtitle'   => '',
+            'book_content'    => '',
+            'book_cover_id'   => 0,
+            'book_cover_url'  => '',
+            'footer_position' => '',
+            'insert_link'     => '',
+            'book_categories' => '',
+            'book_levels'     => '',
+            'associated_author_id' => 0,
+            'message'         => __( 'Invalid book ID, or no book selected.', 'my-book-editor' )
+        ) );
     }
 }
 add_action( 'wp_ajax_my_book_editor_get_book_content', 'my_book_editor_get_book_content_ajax' );
-add_action( 'wp_ajax_nopriv_my_book_editor_get_book_content', 'my_book_editor_get_book_content_ajax' );
+
+/**
+ * AJAX handler to get author content based on author ID.
+ * This is a new AJAX function, specifically for loading author data if needed separately.
+ * For this plugin, it's mainly to populate the dropdown when a book is loaded.
+ * A separate AJAX call is added for when the "Submit" button next to "Select an author" is clicked.
+ */
+function my_book_editor_get_author_content_ajax() {
+    if ( ! is_user_logged_in() || ! current_user_can( 'edit_posts' ) ) {
+        wp_send_json_error( array( 'message' => __( 'You do not have permission to view this content.', 'my-book-editor' ) ) );
+    }
+
+    check_ajax_referer( 'book_editor_nonce', 'nonce' );
+
+    $author_id = isset( $_POST['author_id'] ) ? intval( $_POST['author_id'] ) : 0;
+
+    if ( $author_id ) {
+        $author_post = get_post( $author_id ); // Assuming 'author_profile' is a CPT
+        if ( $author_post && $author_post->post_type === 'author_profile' ) {
+            // You can fetch other author-related data here if needed for the book editor,
+            // but for now, we just confirm the author selection.
+            wp_send_json_success( array(
+                'author_id'   => $author_post->ID,
+                'author_name' => $author_post->post_title,
+                'message'     => 'Author selected: ' . $author_post->post_title,
+            ) );
+        } else {
+            wp_send_json_error( array( 'message' => __( 'Author not found.', 'my-book-editor' ) ) );
+        }
+    } else {
+        wp_send_json_error( array( 'message' => __( 'No author selected.', 'my-book-editor' ) ) );
+    }
+}
+add_action( 'wp_ajax_my_book_editor_get_author_content', 'my_book_editor_get_author_content_ajax' );
+
 
 /**
  * Shortcode to display the Book Content Editor.
@@ -381,7 +507,7 @@ function my_book_editor_shortcode() {
         return ob_get_clean();
     }
 
-    // Initialize values for form fields
+    // Initialize values for form fields - These will be populated by JS on load/selection
     $book_name_val      = '';
     $book_subtitle_val  = '';
     $book_content_val   = '';
@@ -390,46 +516,56 @@ function my_book_editor_shortcode() {
     $footer_position_val= '';
     $insert_link_val    = '';
     $book_post_id_val   = 0;
-    $book_category_val  = array(); // Array of selected category IDs
-    $book_level_val     = array(); // Array of selected level IDs
+    $book_category_val  = '';
+    $book_level_val     = '';
+    $associated_author_id_val = 0; // New: Author ID for initial load
+
 
     // Display status messages
     if ( isset( $_GET['status'] ) ) {
-        echo '<div class="notice ';
-        if ( in_array( $_GET['status'], ['book_published', 'book_saved_draft', 'book_pending_review', 'book_unpublished', 'book_archived', 'book_deleted', 'book_added'] ) ) {
-            echo 'notice-success bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-none relative mb-4';
-        } elseif ( in_array( $_GET['status'], ['error_empty_fields', 'error_book_db', 'error_book_delete', 'error_no_content_to_delete'] ) ) {
-            echo 'notice-error bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-none relative mb-4';
-        }
-        echo ' is-dismissible"><p>';
+        $status_message = '';
+        $status_class = 'bg-green-100 border border-green-400 text-green-700';
+
         switch ( $_GET['status'] ) {
             case 'book_published':
-                echo 'Book successfully published!'; break;
+                $status_message = 'Book successfully published!'; break;
             case 'book_saved_draft':
-                echo 'Book saved as draft!'; break;
+                $status_message = 'Book saved as draft!'; break;
             case 'book_pending_review':
-                echo 'Book submitted for review!'; break;
+                $status_message = 'Book submitted for review!'; break;
             case 'book_unpublished':
-                echo 'Book successfully unpublished (set to draft)!'; break;
+                $status_message = 'Book successfully unpublished (set to draft)!'; break;
             case 'book_archived':
-                echo 'Book successfully archived!'; break;
+                $status_message = 'Book successfully archived!'; break;
             case 'book_deleted':
-                echo 'Book successfully deleted!'; break;
+                $status_message = 'Book successfully deleted!'; break;
             case 'book_added':
-                echo 'New book added successfully!'; break;
-            case 'error_empty_fields':
-                echo 'Error: Book name and content cannot be empty. Please fill all required fields.'; break;
+                $status_message = 'New book added successfully!'; break;
+            case 'error_empty_title':
+                $status_message = 'Error: Book name cannot be empty. Please fill the book name field.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700'; break;
             case 'error_book_db':
-                echo 'An error occurred while submitting the book. Please try again.'; break;
+                $status_message = 'An error occurred while submitting the book. Please try again.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700'; break;
             case 'error_book_delete':
-                echo 'An error occurred while deleting the book. Please try again.'; break;
+                $status_message = 'An error occurred while deleting the book. Please try again.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700'; break;
             case 'error_no_content_to_delete':
-                echo 'No content was selected for deletion.'; break;
+                $status_message = 'No content was selected for deletion.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700'; break;
+            case 'error_permissions':
+                $status_message = 'You do not have sufficient permissions to perform this action.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700'; break;
             default:
-                echo 'An unknown status occurred.';
+                $status_message = 'An unknown status occurred.';
+                $status_class = 'bg-red-100 border border-red-400 text-red-700';
         }
-        echo '</p></div>';
+        echo '<div class="notice ' . esc_attr($status_class) . ' px-4 py-3 rounded-none relative mb-4 is-dismissible"><p>' . esc_html($status_message) . '</p></div>';
     }
+
+    $current_user = wp_get_current_user();
+    $user_email = $current_user->user_email;
+    $user_avatar = get_avatar_url( $current_user->ID, array( 'size' => 24 ) );
 
     ?>
     <div class="bg-gray-100 text-[12px] text-gray-600 font-mono flex justify-end gap-9 px-20 py-1 max-w-12xl mx-auto">
@@ -444,13 +580,14 @@ function my_book_editor_shortcode() {
     <main class="w-full mx-auto flex flex-col md:flex-row gap-2 px-2 py-2 min-h-[118vh]">
         <aside aria-label="Left admin navigation panel" class="w-[35px] md:w-auto border border-gray-300 rounded-none p-3 text-xs text-gray-700 font-sans bg-white flex-shrink-0 min-h-[118vh] overflow-y-auto hide-scrollbar">
             <div class="flex items-center gap-2 mb-4">
-                <img alt="User avatar placeholder" class="rounded-full w-6 h-6" src="https://storage.googleapis.com/a1aa/image/2284957a-9c5a-4c99-b75c-ed6110b26f73.jpg" />
-                <span class="truncate text-[11px] text-gray-600"><?php echo esc_html(wp_get_current_user()->user_email); ?></span>
+                <img alt="User avatar placeholder" class="rounded-full w-6 h-6" src="<?php echo esc_url($user_avatar); ?>" />
+                <span class="truncate text-[11px] text-gray-600"><?php echo esc_html($user_email); ?></span>
                 <i class="fas fa-sync-alt cursor-pointer text-gray-400 text-[12px] ml-auto"></i>
             </div>
             <nav class="space-y-0.5">
                 <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Website Content Editor</h2>
-                <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/author-endpoint/"><i class="fas fa-user text-gray-500"></i> Author Endpoint Page</a>
+                <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/author-endpoint-v2/"><i class="fas fa-user text-gray-500"></i> Author Endpoint Page</a>
+                <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/article-endpoint/"><span><i class="fas fa-file-alt text-gray-500"></i> Article Endpoint Page</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/book-endpoint/"><i class="fas fa-book-open text-gray-500"></i> Book Endpoint Page</a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/video-endpoint/"><span><i class="fab fa-youtube text-gray-500"></i> Video Endpoint Page</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <div><br/></div>
@@ -463,13 +600,13 @@ function my_book_editor_shortcode() {
                 <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/reviews/"><i class="far fa-star text-gray-500"></i> Reviews</a>
                 <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/purchase-history/"><i class="fas fa-history text-gray-500"></i> Purchase History</a>
                 <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/my-account/"><span><i class="fas fa-store text-gray-500"></i> Store Dashboard</span></a>
-                <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/courses/"><span><i class="fas fa-book text-gray-500"></i> Courses</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
+                <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/courses/"><span><i class="fas fa-book-open text-gray-500"></i> Courses</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/lessons/"><span><i class="fas fa-file-alt text-gray-500"></i> All Lessons</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/quizzes/"><span><i class="fas fa-question-circle text-gray-500"></i> Quizzes</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/meeting/"><span><i class="fab fa-youtube text-gray-500"></i> Meetings</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/tutor-booking/"><span><i class="fas fa-calendar-check text-gray-500"></i> Tutor Bookings</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/assignments/"><span><i class="fas fa-tasks text-gray-500"></i> Assignments</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
-                <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/question-answer/"><span><i class="fas fa-question text-gray-500"></i> Question &amp; Answer</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
+                <a class="flex items-center gap-2 justify-between hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/question-answer/"><span><i class="fas fa-question-circle text-gray-500"></i> Question &amp; Answer</span><i class="fas fa-chevron-right text-[9px] text-gray-500"></i></a>
                 <a class="flex items-center gap-2 hover:bg-gray-50 rounded-none px-2 py-1 text-gray-700 text-[11px]" href="https://caastedu.com/dashboard/announcements/"><i class="fas fa-bullhorn text-gray-500"></i> Announcements</a>
             </nav>
             <div class="mt-4 flex items-center gap-2 text-[11px] text-gray-600 cursor-pointer">
@@ -489,107 +626,139 @@ function my_book_editor_shortcode() {
                     <input type="hidden" name="book_post_id" id="book_post_id" value="<?php echo esc_attr( $book_post_id_val ); ?>">
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-3">
-                        <div class="md:col-span-2 flex flex-col">
-                            <label for="selected_book_id" class="block text-sm font-medium text-gray-700">Select a book</label>
-                            <div class="flex items-center gap-2">
-                                <select name="selected_book_id" id="selected_book_id" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                                    <option value="">-- Select a book --</option>
-                                    <?php
-                                    $books = get_posts( array(
-                                        'post_type'      => 'book_profile',
-                                        'posts_per_page' => -1,
-                                        'orderby'        => 'title',
-                                        'order'          => 'ASC',
-                                        'post_status'    => array('publish', 'draft', 'pending', 'archive'),
-                                    ) );
-                                    foreach ( $books as $book ) {
-                                        echo '<option value="' . esc_attr( $book->ID ) . '">' . esc_html( $book->post_title ) . '</option>';
-                                    }
-                                    ?>
-                                </select>
-                                <button type="button" id="load-book-content-btn" class="button button-primary bg-gray-200 text-gray-800 px-4 py-2 rounded-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Submit</button>
-                            </div>
+                        <div class="md:col-span-2">
+                            <label for="selected_author_id" class="block text-sm font-medium text-gray-700">Select an author</label>
+                            <select name="selected_author_id" id="selected_author_id" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">-- Select an author --</option>
+                                <?php
+                                // Fetch authors from 'author_profile' CPT
+                                $authors = get_posts( array(
+                                    'post_type'      => 'author_profile', // Assuming 'author_profile' CPT
+                                    'posts_per_page' => -1,
+                                    'orderby'        => 'title',
+                                    'order'          => 'ASC',
+                                    'post_status'    => 'publish', // Only published authors
+                                ) );
+                                foreach ( $authors as $author ) {
+                                    $selected = selected( $associated_author_id_val, $author->ID, false );
+                                    echo '<option value="' . esc_attr( $author->ID ) . '" ' . $selected . '>' . esc_html( $author->post_title ) . '</option>';
+                                }
+                                ?>
+                            </select>
                         </div>
-                        <div class="md:col-span-1">
-                            </div>
+                        <div class="flex items-end">
+                            <button type="button" id="load-author-content-btn" class="button button-primary bg-gray-200 text-gray-800 px-4 py-2 rounded-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 w-full">Submit</button>
+                        </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-                        <div class="md:col-span-2 flex flex-col gap-3">
-                            <div class="flex flex-col">
-                                <label for="new_book_name" class="block text-sm font-medium text-gray-700">Add a book</label>
-                                <input type="text" name="new_book_name" id="new_book_name" placeholder="Enter book name" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="" />
-                            </div>
-
-                            <div class="flex flex-col">
-                                <label for="book_subtitle" class="block text-sm font-medium text-gray-700">Book Subtitle:</label>
-                                <input type="text" name="book_subtitle" id="book_subtitle" placeholder="Book subtitle text" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="<?php echo esc_attr($book_subtitle_val); ?>" />
-                            </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-3">
+                        <div class="md:col-span-2">
+                            <label for="selected_book_id" class="block text-sm font-medium text-gray-700">Select a book</label>
+                            <select name="selected_book_id" id="selected_book_id" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">-- Select a book --</option>
+                                <?php
+                                $books = get_posts( array(
+                                    'post_type'      => 'book_profile',
+                                    'posts_per_page' => -1,
+                                    'orderby'        => 'title',
+                                    'order'          => 'ASC',
+                                    'post_status'    => array('publish', 'draft', 'pending', 'archive'),
+                                ) );
+                                foreach ( $books as $book ) {
+                                    echo '<option value="' . esc_attr( $book->ID ) . '">' . esc_html( $book->post_title ) . '</option>';
+                                }
+                                ?>
+                            </select>
                         </div>
+                        <div class="flex items-end">
+                            <button type="button" id="load-book-content-btn" class="button button-primary bg-gray-200 text-gray-800 px-4 py-2 rounded-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 w-full">Submit</button>
+                        </div>
+                    </div>
 
-                        <div class="flex flex-col border border-gray-300 rounded-none p-2 bg-white">
+                    <div class="flex flex-col mb-3">
+                        <label for="new_book_name" class="block text-sm font-medium text-gray-700">Add a book</label>
+                        <input type="text" name="new_book_name" id="new_book_name" placeholder="Enter book name" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="<?php echo esc_attr($book_name_val); ?>" />
+                    </div>
+
+                    <div class="flex flex-col mb-3">
+                        <label for="book_subtitle" class="block text-sm font-medium text-gray-700">Book Subtitle:</label>
+                        <input type="text" name="book_subtitle" id="book_subtitle" placeholder="Book subtitle text" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" value="<?php echo esc_attr($book_subtitle_val); ?>" />
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-end mb-3">
+                        <div class="md:col-span-2">
                             <label class="block text-sm font-medium text-gray-700">Upload book cover image</label>
                             <div class="mt-1 flex items-center gap-2">
                                 <input type="text" id="book_cover_url" name="book_cover_url" class="flex-grow border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Browse book cover" readonly value="<?php echo esc_url($book_cover_url_val); ?>" />
                                 <input type="hidden" id="book_cover_id" name="book_cover_id" value="<?php echo esc_attr($book_cover_id_val); ?>" />
-                                <button type="button" class="button button-secondary browse-book-cover bg-gray-200 text-gray-800 px-4 py-2 rounded-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Browse</button>
                             </div>
-                            <div id="book-cover-preview" class="mt-2" style="<?php echo empty($book_cover_url_val) ? 'display:none;' : ''; ?>">
-                                <img src="<?php echo esc_url($book_cover_url_val); ?>" alt="Book Cover Preview" style="max-width: 150px; height: auto; display: block; margin: 0 auto;" />
-                                <button type="button" class="remove-book-cover text-red-500 hover:text-red-700 text-xs mt-1 rounded-none">Remove Image</button>
+                            <div id="book-cover-preview" class="mt-2 text-center" style="<?php echo empty($book_cover_url_val) ? 'display:none;' : ''; ?>">
+                                <img src="<?php echo esc_url($book_cover_url_val); ?>" alt="Book Cover Preview" style="max-width: 150px; height: auto; display: inline-block; margin-bottom: 5px;" />
+                                <button type="button" class="remove-book-cover text-red-500 hover:text-red-700 text-xs mt-1 rounded-none block mx-auto">Remove Image</button>
                             </div>
                         </div>
+                        <div class="flex items-end">
+                            <button type="button" class="button button-secondary browse-book-cover bg-gray-200 text-gray-800 px-4 py-2 rounded-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 w-full">Browse</button>
+                        </div>
                     </div>
+
 
                     <div class="mb-3">
                         <label for="book_content" class="block text-sm font-medium text-gray-700">Body Content:</label>
                         <?php
-                        wp_editor( $book_content_val, 'book_content', array(
-                            'textarea_name' => 'book_content',
-                            'textarea_rows' => 12,
-                            'teeny'         => false,
-                            'media_buttons' => false,
-                            'tinymce'       => array(
-                                'height' => 300, // Adjusted height for more content
-                                'toolbar1' => 'undo redo | bold italic | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link | forecolor backcolor',
-                                'toolbar2' => 'print preview | table | charmap emoticons | code fullscreen',
-                            ),
-                            'editor_class' => 'mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm',
-                        ) );
+                        if ( current_user_can( 'edit_posts' ) ) {
+                            wp_editor( $book_content_val, 'book_content', array(
+                                'textarea_name' => 'book_content',
+                                'textarea_rows' => 12,
+                                'teeny'         => false,
+                                'media_buttons' => false,
+                                'tinymce'       => array(
+                                    'height' => 300,
+                                    'toolbar1' => 'undo redo | bold italic | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link | forecolor backcolor',
+                                    'toolbar2' => 'print preview | table | charmap emoticons | code fullscreen',
+                                ),
+                                'editor_class' => 'mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm',
+                            ) );
+                        } else {
+                            echo '<textarea name="book_content" id="book_content" rows="12" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">' . esc_textarea($book_content_val) . '</textarea>';
+                        }
                         ?>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
-                        <div class="flex flex-col">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
                             <label for="book_category" class="block text-sm font-medium text-gray-700">Select a category</label>
-                            <select name="book_category[]" id="book_category" multiple class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm h-24">
+                            <select name="book_category" id="book_category" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">-- Select a category --</option>
                                 <?php
                                 $categories = get_terms( array(
                                     'taxonomy'   => 'book_category',
                                     'hide_empty' => false,
                                 ) );
-                                foreach ( $categories as $term ) {
-                                    echo '<option value="' . esc_attr( $term->term_id ) . '" ' . selected( in_array( $term->term_id, $book_category_val ), true, false ) . '>' . esc_html( $term->name ) . '</option>';
+                                foreach ( $categories as $category ) {
+                                    $selected = ( $book_category_val === $category->slug ) ? 'selected' : '';
+                                    echo '<option value="' . esc_attr( $category->slug ) . '" ' . $selected . '>' . esc_html( $category->name ) . '</option>';
                                 }
                                 ?>
                             </select>
                         </div>
-                        <div class="flex flex-col">
+
+                        <div>
                             <label for="book_level" class="block text-sm font-medium text-gray-700">Select a level</label>
-                            <select name="book_level[]" id="book_level" multiple class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm h-24">
+                            <select name="book_level" id="book_level" class="mt-1 block w-full border border-gray-300 rounded-none shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                <option value="">-- Select a level --</option>
                                 <?php
                                 $levels = get_terms( array(
                                     'taxonomy'   => 'book_level',
                                     'hide_empty' => false,
                                 ) );
-                                foreach ( $levels as $term ) {
-                                    echo '<option value="' . esc_attr( $term->term_id ) . '" ' . selected( in_array( $term->term_id, $book_level_val ), true, false ) . '>' . esc_html( $term->name ) . '</option>';
+                                foreach ( $levels as $level ) {
+                                    $selected = ( $book_level_val === $level->slug ) ? 'selected' : '';
+                                    echo '<option value="' . esc_attr( $level->slug ) . '" ' . $selected . '>' . esc_html( $level->name ) . '</option>';
                                 }
                                 ?>
                             </select>
                         </div>
-                        <div class="flex flex-col">
-                            </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
@@ -635,38 +804,8 @@ function my_book_editor_shortcode() {
             </div>
         </section>
 
-        <aside aria-label="Right side content preview panel" class="w-full md:w-48 border border-gray-300 rounded-none p-3 text-xs text-gray-700 font-sans bg-white flex-shrink-0 min-h-[118vh] overflow-y-auto hide-scrollbar">
-            <nav class="flex gap-3 border border-gray-300 rounded-none px-2 py-1 mb-1 text-[9px] font-bold bg-gray-100">
-                <a class="hover:underline text-black" href="#">Home</a>
-                <a class="hover:underline text-black bg-yellow-100 px-1" href="#">Books</a>
-                <a class="hover:underline text-black" href="#">Videos</a>
-                <a class="hover:underline text-black" href="#">Author</a>
-            </nav>
-            <img alt="Small banner ad placeholder 300x30" class="mb-1 w-full rounded-none" height="30" src="https://via.placeholder.com/300x30/d3d3d3?text=The+Top+Ad+Banner" />
-            <div class="border border-gray-300 rounded-none p-1 text-[9px] font-bold text-center">
-                Book Title
-                <div class="font-normal text-[7px]">Book subtitle text</div>
-            </div>
-            <img alt="Book Cover Photo" class="mb-1 w-full rounded-none" src="https://via.placeholder.com/300x150/d3d3d3?text=Cover+Photo" />
-            <div class="border border-gray-300 rounded-none p-1 text-[7px] font-bold text-center">
-                Body Content
-                <div class="font-normal text-[6px]">0000 0000 0000</div>
-            </div>
-            <div class="grid grid-cols-3 gap-1 border border-gray-300 rounded-none p-1 text-[7px] font-bold text-red-600 text-center bg-gray-100">
-                <?php for ($i = 1; $i <= 12; $i++): ?>
-                    <div class="border border-gray-300 p-1 rounded-none bg-white">Featured_<?php echo $i; ?></div>
-                <?php endfor; ?>
-            </div>
-            <img alt="Gravity Ad" class="mb-1 w-full rounded-none" src="https://via.placeholder.com/300x50/d3d3d3?text=GRAVITY" />
-        </aside>
     </main>
     <?php
     return ob_get_clean();
 }
 add_shortcode( 'my_book_editor', 'my_book_editor_shortcode' );
-
-// Helper function to check if a user has a specific role (copied from author editor)
-function is_user_in_role( $role ) {
-    $user = wp_get_current_user();
-    return in_array( $role, (array) $user->roles );
-}
